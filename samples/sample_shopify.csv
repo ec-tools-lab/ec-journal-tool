@@ -1,0 +1,5 @@
+Transaction Date,Type,Order,Card Brand,Card Source,Payout Status,Payout Date,Payout ID,Available On,Amount,Fee,Net,Checkout,Payment Method Name,Presentment Amount,Presentment Currency,Currency
+2026-10-10 10:00:00 +0900,charge,,,,paid,2026-10-20 00:00:00 +0900,P1001,,10000,360,9640,,,,,JPY
+2026-10-12 11:00:00 +0900,charge,,,,paid,2026-10-20 00:00:00 +0900,P1001,,5000,180,4820,,,,,JPY
+2026-10-14 12:00:00 +0900,refund,,,,paid,2026-10-20 00:00:00 +0900,P1001,,-2000,0,-2000,,,,,JPY
+2026-10-18 09:00:00 +0900,charge,,,,pending,,,,3000,108,2892,,,,,JPY
