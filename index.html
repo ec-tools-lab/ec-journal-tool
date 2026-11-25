@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ECモール売上 → 会計ソフト仕訳CSV 変換（試作）</title>
+<style>
+  body { font-family: system-ui, "Yu Gothic UI", sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; color: #222; line-height: 1.6; }
+  h1 { font-size: 1.3rem; }
+  fieldset { border: 1px solid #ccc; border-radius: 6px; margin: 12px 0; padding: 10px 14px; }
+  legend { font-weight: 600; }
+  label { display: inline-block; margin: 4px 14px 4px 0; }
+  input[type=text] { width: 9em; }
+  .note { background: #fff8e1; border: 1px solid #f0d98c; padding: 8px 12px; border-radius: 6px; font-size: .9rem; }
+  .warn { color: #b00020; }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 3px 6px; text-align: left; white-space: nowrap; }
+  th { background: #f4f4f4; }
+  td.num { text-align: right; }
+  button { padding: 8px 18px; font-size: 1rem; cursor: pointer; }
+  #drop { border: 2px dashed #888; border-radius: 8px; padding: 18px; text-align: center; }
+  #drop.over { background: #eef6ff; }
+</style>
+</head>
+<body>
+<h1>ECモール売上 → 会計ソフト仕訳CSV 変換（試作 v0.2）</h1>
+<p>ネットショップ（Amazon・Shopify）の入金レポートを、弥生会計・マネーフォワード クラウド会計の取り込み形式（各社の公式資料に基づく）の仕訳CSVに変換する無料ツールです。実際の会計ソフトへの取り込みは、まだ確認できていません。</p>
+<p class="note">
+  この画面のデータは<strong>あなたのパソコンのブラウザの中だけで処理</strong>され、外部には送信されません（通信を行うプログラムを含みません）。<br>
+  <strong>試作・無保証です。</strong>実際のお店のデータでの検証はまだ行っていません。会計・税務の判断は税理士にご確認ください。取り込み前に、プレビューと会計ソフト側の内容を必ず確認してください。
+</p>
+<details>
+  <summary>使い方・試し方</summary>
+  <ol>
+    <li>下の「レポートの種類」と「出力先」を選びます。</li>
+    <li>勘定科目を、お使いの会計ソフトの科目名に合わせます。</li>
+    <li>Amazonの決済レポート、またはShopify Paymentsの取引CSVをドロップします。</li>
+    <li>プレビューと警告を確認し、「CSVをダウンロード」を押して、会計ソフトに取り込みます。</li>
+  </ol>
+  <p>まず試すだけなら、架空のサンプルが使えます：
+    <a href="samples/sample_amazon.tsv" download>Amazon用サンプル</a> /
+    <a href="samples/sample_shopify.csv" download>Shopify用サンプル</a>（すべて架空のデータです）</p>
+  <p>対応していないもの: 楽天市場、Yahoo!ショッピング、freee、円以外の通貨。</p>
+</details>
+
+<fieldset>
+  <legend>1. レポートの種類と出力先</legend>
+  <label>入力:
+    <select id="source">
+      <option value="amazon">Amazon 決済レポート（タブ区切り）</option>
+      <option value="shopify">Shopify Payments 取引CSV</option>
+    </select>
+  </label>
+  <label>出力:
+    <select id="format">
+      <option value="yayoi">弥生会計（インポート形式）</option>
+      <option value="mf">マネーフォワード クラウド会計（仕訳帳）</option>
+    </select>
+  </label>
+  <label>文字コード:
+    <select id="enc">
+      <option value="sjis">Shift_JIS（既定・要確認）</option>
+      <option value="utf8">UTF-8（BOMあり）</option>
+    </select>
+  </label>
+</fieldset>
+
+<fieldset>
+  <legend>2. 勘定科目（会計ソフトの科目名と同じにしてください）</legend>
+  <label>売上 <input type="text" id="acc_sales" value="売上高"></label>
+  <label>手数料 <input type="text" id="acc_fee" value="支払手数料"></label>
+  <label>送料等 <input type="text" id="acc_ship" value="荷造運賃"></label>
+  <label>広告 <input type="text" id="acc_ad" value="広告宣伝費"></label>
+  <label>値引 <input type="text" id="acc_disc" value="売上値引"></label>
+  <label>未分類 <input type="text" id="acc_other" value="仮払金"></label>
+  <label>モール債権 <input type="text" id="acc_rec" value="未収入金"></label>
+  <label>預金 <input type="text" id="acc_bank" value="普通預金"></label>
+</fieldset>
+
+<fieldset>
+  <legend>3. レポートのファイルを選択</legend>
+  <div id="drop">ここにファイルをドロップ、または <input type="file" id="file" accept=".csv,.tsv,.txt"></div>
+</fieldset>
+
+<div id="msgs"></div>
+<div id="result"></div>
+
+<hr>
+<footer style="font-size:.85rem;color:#555">
+  <p><strong>ご意見・動作報告をお待ちしています。</strong>
+    「取り込めた／取り込めなかった」「列名が違う」「こんな機能がほしい」など、一言でも助かります。
+    <a href="https://github.com/ec-tools-lab/ec-journal-tool/issues/new">フィードバックはこちら</a>
+    （ファイルの中身や個人情報・取引先名は書き込まないでください）</p>
+  <p>免責: 本ツールは無保証の試作です。出力結果の正確性・会計処理の適否・取り込み結果について、作者は責任を負いません。税務判断は税理士にご相談ください。
+  本ツールは各社（Amazon、Shopify、弥生、マネーフォワード）とは無関係の非公式ツールです。社名・製品名は各社の商標です。</p>
+</footer>
+
+<script>
+"use strict";
+const TAX = {
+  yayoi: { sale: "課税売上込10%", purchase: "課対仕入込10%", none: "対象外" },
+  mf:    { sale: "課税売上 10%", purchase: "課税仕入 10%", none: "対象外" },
+};
+const MF_LABELS = ["取引No","取引日","借方勘定科目","借方補助科目","借方部門","借方取引先","借方税区分","借方インボイス","借方金額(円)","借方税額","貸方勘定科目","貸方補助科目","貸方部門","貸方取引先","貸方税区分","貸方インボイス","貸方金額(円)","貸方税額","摘要","仕訳メモ","タグ","MF仕訳タイプ","決算整理仕訳","作成日時","作成者","最終更新日時","最終更新者"];
+
+function cfg() {
+  const v = id => document.getElementById(id).value.trim();
+  return {
+    receivable: v("acc_rec"), bank: v("acc_bank"),
+    categories: [
+      { name: "売上", match: ["principal","itemprice","charge"], kind: "income", account: v("acc_sales"), tax: "sale" },
+      { name: "送料売上", match: ["shipping","giftwrap"], kind: "income", account: v("acc_sales"), tax: "sale" },
+      { name: "返金", match: ["refund"], kind: "income", account: v("acc_sales"), tax: "sale" },
+      { name: "販売手数料", match: ["commission","referral"], kind: "expense", account: v("acc_fee"), tax: "purchase" },
+      { name: "FBA手数料", match: ["fba","fulfillment","storage"], kind: "expense", account: v("acc_ship"), tax: "purchase" },
+      { name: "広告費", match: ["advertising"], kind: "expense", account: v("acc_ad"), tax: "purchase" },
+      { name: "プロモーション値引", match: ["promotion","coupon"], kind: "expense", account: v("acc_disc"), tax: "sale" },
+    ],
+    feeCategory: { name: "決済手数料", kind: "expense", account: v("acc_fee"), tax: "purchase" },
+    unmapped: { name: "未分類", kind: "expense", account: v("acc_other"), tax: "none" },
+  };
+}
+
+// ---- CSV/TSV パーサ（引用符対応）----
+function parseDelimited(text, delim) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i+1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === delim) { row.push(cell); cell = ""; }
+    else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else if (c !== "\r") cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  const header = rows.shift() || [];
+  return rows.filter(r => r.some(x => x !== "")).map(r => Object.fromEntries(header.map((h, i) => [h.trim(), r[i] ?? ""])));
+}
+const num = s => { s = (s || "").trim().replace(/,/g, ""); return s ? parseFloat(s) : 0; };
+function yen(x, warns, what) {
+  const r = Math.round(x);
+  if (r !== x && !warns.some(w => w.includes("小数"))) warns.push("小数の金額を四捨五入しました(" + what + ")。円以外の通貨でないか確認してください");
+  return r;
+}
+function parseDate(s) {
+  s = (s || "").trim();
+  let m = s.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+  if (m) return m[1] + "/" + m[2].padStart(2, "0") + "/" + m[3].padStart(2, "0");
+  m = s.match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/);
+  if (m) return m[3] + "/" + m[2].padStart(2, "0") + "/" + m[1].padStart(2, "0");
+  throw new Error("日付を解釈できません: " + s);
+}
+function needCols(rows, cols) {
+  if (!rows.length) throw new Error("データ行がありません");
+  const miss = cols.filter(c => !(c in rows[0]));
+  if (miss.length) throw new Error("必須列がありません: " + miss.join(", ") + " / 見つかった列: " + Object.keys(rows[0]).join(", "));
+}
+function classify(desc, c) {
+  const d = (desc || "").trim().toLowerCase();
+  return c.categories.find(k => k.match.some(w => d.includes(w))) || c.unmapped;
+}
+function addSum(sums, cat, amt) {
+  if (!sums.has(cat.name)) sums.set(cat.name, { cat, total: 0 });
+  sums.get(cat.name).total += amt;
+}
+function journalsFromSums(sums, saleDate, depDate, depAmt, label, c) {
+  const rec = c.receivable, out = [];
+  for (const { cat, total: t } of sums.values()) {
+    if (t === 0) continue;
+    const a = Math.abs(t), memo = label + " " + cat.name;
+    if (cat.kind === "income") {
+      if (t > 0) out.push([saleDate, [rec, "none", a], [cat.account, cat.tax, a], memo]);
+      else out.push([saleDate, [cat.account, cat.tax, a], [rec, "none", a], memo + "(返品等)"]);
+    } else {
+      if (t < 0) out.push([saleDate, [cat.account, cat.tax, a], [rec, "none", a], memo]);
+      else out.push([saleDate, [rec, "none", a], [cat.account, cat.tax, a], memo + "(戻り)"]);
+    }
+  }
+  if (depAmt !== 0) {
+    const a = Math.abs(depAmt), memo = label + " 入金";
+    if (depAmt > 0) out.push([depDate, [c.bank, "none", a], [rec, "none", a], memo]);
+    else out.push([depDate, [rec, "none", a], [c.bank, "none", a], memo + "(引落)"]);
+  }
+  return out;
+}
+
+function readAmazon(text, c, warns) {
+  const rows = parseDelimited(text, "\t");
+  needCols(rows, ["settlement-id", "amount-description", "amount"]);
+  const head = rows[0], sid = (head["settlement-id"] || "").trim();
+  const end = parseDate(head["settlement-end-date"] || head["deposit-date"]);
+  const dep = parseDate(head["deposit-date"] || head["settlement-end-date"]);
+  const total = yen(num(head["total-amount"]), warns, "total-amount");
+  const sums = new Map(); let detail = 0; const unm = new Set();
+  for (const r of rows.slice(1)) {
+    const desc = (r["amount-description"] || "").trim(), amt = yen(num(r["amount"]), warns, desc);
+    if (!desc && amt === 0) continue;
+    detail += amt;
+    const cat = classify(desc, c); if (cat === c.unmapped) unm.add(desc);
+    addSum(sums, cat, amt);
+  }
+  if (detail !== total) warns.push("合計が一致しません: 明細合計=" + detail + " / レポート合計=" + total + " (差額 " + (total - detail) + ")");
+  if (unm.size) warns.push("未分類の項目(" + c.unmapped.account + "に計上): " + [...unm].join(", "));
+  return journalsFromSums(sums, end, dep, total, "Amazon決済" + sid, c);
+}
+
+function readShopify(text, c, warns) {
+  const rows = parseDelimited(text, ",");
+  needCols(rows, ["Transaction Date","Type","Amount","Fee","Net","Payout ID","Payout Date"]);
+  const groups = new Map();
+  for (const r of rows) { const k = (r["Payout ID"] || "").trim(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  if (groups.has("")) { warns.push("Payout IDが空の取引が" + groups.get("").length + "件あります(未入金/保留)。出力から除外しました"); groups.delete(""); }
+  let out = []; const unm = new Set();
+  for (const [pid, grp] of groups) {
+    const cur = new Set(grp.map(r => ((r["Currency"] || "JPY").trim() || "JPY").toUpperCase()));
+    if (cur.size !== 1 || !cur.has("JPY")) { warns.push("Payout " + pid + ": 通貨が" + [...cur].join("/") + "です。円以外は未対応のため除外しました"); continue; }
+    const sums = new Map(); let netTotal = 0;
+    const lastTx = grp.map(r => parseDate(r["Transaction Date"])).sort().pop();
+    const payDate = parseDate(grp[0]["Payout Date"]);
+    for (const r of grp) {
+      const typ = (r["Type"] || "").trim();
+      const amt = yen(num(r["Amount"]), warns, "Amount"), fee = yen(num(r["Fee"]), warns, "Fee"), net = yen(num(r["Net"]), warns, "Net");
+      if (net !== amt - fee) warns.push("Payout " + pid + ": Net != Amount - Fee の行があります(" + typ + ")");
+      netTotal += net;
+      const cat = classify(typ, c); if (cat === c.unmapped) unm.add(typ);
+      addSum(sums, cat, amt);
+      if (fee !== 0) addSum(sums, c.feeCategory, -fee);
+    }
+    out = out.concat(journalsFromSums(sums, lastTx, payDate, netTotal, "Shopify Payout " + pid, c));
+  }
+  if (unm.size) warns.push("未分類の取引種別(" + c.unmapped.account + "に計上): " + [...unm].join(", "));
+  return out;
+}
+
+// ---- 出力 ----
+// 弥生の摘要は半角64文字まで(全角=2)。
+function truncBytes(s, max) { let n = 0, o = ""; for (const ch of s) { const b = ch.charCodeAt(0) < 0x80 || (ch.charCodeAt(0) >= 0xFF61 && ch.charCodeAt(0) <= 0xFF9F) ? 1 : 2; if (n + b > max) break; n += b; o += ch; } return o; }
+function toYayoi(js) {
+  return js.map(([d, [da, dt, dm], [ca, ct, cm], memo]) => {
+    const r = Array(25).fill("");
+    r[0] = "2000"; r[3] = d; r[4] = da; r[7] = TAX.yayoi[dt]; r[8] = String(dm);
+    r[10] = ca; r[13] = TAX.yayoi[ct]; r[14] = String(cm); r[16] = truncBytes(memo, 64); r[19] = "0"; r[24] = "no";
+    return r;
+  });
+}
+function toMF(js) {
+  const out = [MF_LABELS.slice()];
+  for (const [d, [da, dt, dm], [ca, ct, cm], memo] of js) {
+    const r = Array(27).fill("");
+    r[1] = d; r[2] = da; r[6] = TAX.mf[dt]; r[8] = String(dm); r[9] = "0";
+    r[10] = ca; r[14] = TAX.mf[ct]; r[16] = String(cm); r[17] = "0"; r[18] = memo.slice(0, 200);
+    out.push(r);
+  }
+  return out;
+}
+const csvCell = s => /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+const toCsv = rows => rows.map(r => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+
+// Shift_JIS(cp932)エンコーダ: ブラウザのTextDecoderから逆引き表を作る
+let SJIS = null;
+function buildSjis() {
+  const dec = new TextDecoder("shift_jis"); const m = new Map();
+  for (let b = 0x20; b <= 0x7E; b++) m.set(String.fromCharCode(b), [b]);
+  for (let b = 0xA1; b <= 0xDF; b++) { const ch = dec.decode(Uint8Array.of(b)); if (ch.length === 1 && ch !== "�") m.set(ch, [b]); }
+  for (let h = 0x81; h <= 0xFC; h++) {
+    if (h > 0x9F && h < 0xE0) continue;
+    for (let l = 0x40; l <= 0xFC; l++) {
+      if (l === 0x7F) continue;
+      const ch = dec.decode(Uint8Array.of(h, l));
+      if (ch.length === 1 && ch !== "�" && !m.has(ch)) m.set(ch, [h, l]);
+    }
+  }
+  return m;
+}
+function encodeSjis(text, warns) {
+  if (!SJIS) SJIS = buildSjis();
+  const bytes = []; const bad = new Set();
+  for (const ch of text) {
+    if (ch === "\r" || ch === "\n") { bytes.push(ch.charCodeAt(0)); continue; }
+    const b = SJIS.get(ch);
+    if (b) bytes.push(...b); else { bytes.push(0x3F); bad.add(ch); }
+  }
+  if (bad.size) warns.push("Shift_JISに変換できない文字を「?」にしました: " + [...bad].join(" "));
+  return new Uint8Array(bytes);
+}
+
+function validate(js, rowsOut, fmt) {
+  const p = [];
+  const d = js.reduce((s, j) => s + j[1][2], 0), c = js.reduce((s, j) => s + j[2][2], 0);
+  if (d !== c) p.push("借方合計と貸方合計が一致しません: " + d + " / " + c);
+  const w = fmt === "yayoi" ? 25 : 27;
+  rowsOut.forEach((r, i) => { if (r.length !== w) p.push("行" + (i + 1) + ": 列数が" + w + "ではありません"); });
+  return p;
+}
+
+// ---- 実行 ----
+function esc(s) { return String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])); }
+let lastFile = null;
+async function run() {
+  const msgs = document.getElementById("msgs"), result = document.getElementById("result");
+  msgs.innerHTML = ""; result.innerHTML = "";
+  if (!lastFile) return;
+  const warns = [];
+  try {
+    const text = await lastFile.text();
+    const source = document.getElementById("source").value, fmt = document.getElementById("format").value;
+    const c = cfg();
+    const js = source === "amazon" ? readAmazon(text, c, warns) : readShopify(text, c, warns);
+    const rowsOut = fmt === "yayoi" ? toYayoi(js) : toMF(js);
+    const problems = validate(js, rowsOut, fmt);
+    const csv = toCsv(rowsOut);
+    const encSel = document.getElementById("enc").value;
+    let blob;
+    if (encSel === "sjis") blob = new Blob([encodeSjis(csv, warns)], { type: "text/csv" });
+    else blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    msgs.innerHTML = [...warns, ...problems].map(w => '<p class="warn">警告: ' + esc(w) + "</p>").join("");
+    const body = js.map(([d, [da, , dm], [ca, , cm], memo]) =>
+      "<tr><td>" + esc(d) + "</td><td>" + esc(da) + '</td><td class="num">' + dm + "</td><td>" + esc(ca) + '</td><td class="num">' + cm + "</td><td>" + esc(memo) + "</td></tr>").join("");
+    const url = URL.createObjectURL(blob);
+    const name = (fmt === "yayoi" ? "yayoi_import" : "mf_journal") + ".csv";
+    result.innerHTML = "<h2>仕訳プレビュー（" + js.length + "件）</h2>" +
+      '<p><a id="dl" href="' + url + '" download="' + name + '"><button type="button">CSVをダウンロード</button></a></p>' +
+      "<table><tr><th>日付</th><th>借方</th><th>金額</th><th>貸方</th><th>金額</th><th>摘要</th></tr>" + body + "</table>";
+    window.__lastResult = { rowsOut, warns, problems, count: js.length, bytes: blob.size };
+  } catch (e) {
+    msgs.innerHTML = '<p class="warn">エラー: ' + esc(e.message) + "</p>";
+  }
+}
+const fileInput = document.getElementById("file"), drop = document.getElementById("drop");
+fileInput.addEventListener("change", () => { lastFile = fileInput.files[0] || null; run(); });
+["source","format","enc","acc_sales","acc_fee","acc_ship","acc_ad","acc_disc","acc_other","acc_rec","acc_bank"].forEach(id => document.getElementById(id).addEventListener("change", run));
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); lastFile = e.dataTransfer.files[0] || null; run(); });
+</script>
+</body>
+</html>
